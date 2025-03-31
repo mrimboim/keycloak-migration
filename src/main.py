@@ -159,6 +159,12 @@ class KeycloakMigrationTool:
                 
                 # Determine loginId and additionalIdentifiers
                 login_id = username if username else email
+
+                user_roles = user_data.get("realmRoles", [])
+                for clientRoles in user_data.get("clientRoles",{}).values():
+                    user_roles.extend(clientRoles)
+
+                user_tenants = [ {"tenantId": group.lstrip("/")} for group in user_data.get("groups", [])]
                 
                 additional_identifiers = [email] if username else []
                 if user_data.get("enabled") == False:
@@ -187,7 +193,9 @@ class KeycloakMigrationTool:
                     "email": email,
                     "verifiedEmail": verified_email,
                     "additionalIdentifiers": additional_identifiers,
-                    "hashedPassword": hashed_password
+                    "hashedPassword": hashed_password,
+                    "roleNames": user_roles,
+                    "userTenants": user_tenants
                 }
 
                 user_batch.append(user)
