@@ -1,4 +1,5 @@
 .env
 keycloak-export/export/
+keycloak-export/ 
 logs/
 descope-migration/
