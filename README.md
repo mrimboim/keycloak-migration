@@ -1,3 +1,5 @@
+![image](https://github.com/user-attachments/assets/aea05989-59c4-43a2-989c-ffdcf89f6270)
+
 # Descope Keycloak Migration Tool
 
 This repository includes a Python utility for migrating your Keycloak users, roles, groups, and password hashes to Descope.
