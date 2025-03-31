@@ -37,6 +37,61 @@ class KeycloakMigrationTool:
 
         self.descope_client = DescopeClient(project_id=self.project_id, management_key=self.management_key)
     
+    def process_roles(self) -> None:
+        #Get all existing roles and groups from descope
+        descope_roles = []
+        keycloak_roles = []
+        try:
+            roles_resp = self.descope_client.mgmt.role.load_all()
+            roles = roles_resp["roles"]
+            descope_roles = [role['name'] for role in roles]
+            print(descope_roles) #remove later
+        except Exception as e:
+            logging.error(f"Failed to get roles: {str(e)}")
+
+        try:
+            file_pattern = f"{self.realm}-realm"
+            for file_name in os.listdir(self.path):
+                if file_name.startswith(file_pattern) and file_name.endswith('.json'):
+                    file_path = os.path.join(self.path, file_name)
+                    with open(file_path, 'r') as f:
+                        file_data = json.load(f)
+                        for role in file_data.get("roles", {}).get("realm", []):
+                            keycloak_roles.append(role["name"])
+                        for client_roles in file_data.get("roles",{}).get("client",{}).values():
+                            for role in client_roles:
+                                keycloak_roles.append(role["name"])
+            print(keycloak_roles) # remove later
+
+        except Exception as e:
+            logging.error(f"Failed to get keycloak roles from {file_path}: {str(e)}") 
+                        
+        try:
+            # Create roles that exist in Keycloak but not in Descope
+            unique_roles = set(keycloak_roles) - set(descope_roles)
+            for role_name in unique_roles:
+                try:
+                    self.descope_client.mgmt.role.create(name=role_name)
+                    logging.info(f"Created role: {role_name}")
+                except Exception as e:
+                    logging.error(f"Failed to create role {role_name}: {str(e)}")
+        except Exception as e:
+            logging.error(f"Failed to create roles: {str(e)}")  
+
+
+
+
+    def process_groups(self) -> None:
+        try:
+            tenants_resp = self.descope_client.mgmt.tenant.load_all()
+            tenants = tenants_resp["tenants"]
+            tenant_names = [tenant['id'] for tenant in tenants]
+            print(tenant_names)
+        except Exception as e:
+            logging.error(f"Failed to get tenants: {str(e)}")
+
+
+
     def process_files(self) -> None:
         """Process all user export files in the specified directory that match the realm"""
         try:
@@ -150,6 +205,8 @@ def main():
     args = parser.parse_args()
 
     migration_tool = KeycloakMigrationTool(args.path, args.realm)
+    migration_tool.process_roles()
+    migration_tool.process_groups()
     migration_tool.process_files()
 
 if __name__ == "__main__":
