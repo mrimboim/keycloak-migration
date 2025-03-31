@@ -7,7 +7,6 @@ from typing import Dict, List
 import requests
 from dotenv import load_dotenv
 from descope import DescopeClient
-from descope.management.user import UserObj
 import time
 
 # Load environment variables from .env file
@@ -38,87 +37,99 @@ class KeycloakMigrationTool:
         self.descope_client = DescopeClient(project_id=self.project_id, management_key=self.management_key)
     
     def create_roles_in_descope(self) -> None:
-        #Get all existing roles and groups from descope
-        descope_roles = []
-        keycloak_roles = []
+        """Create roles in Descope that exist in Keycloak but not in Descope"""
+        # Consolidate role fetching into a helper method
+        keycloak_roles = self.get_keycloak_roles()
+        descope_roles = self.get_descope_roles()
+        
+        # Create roles that exist in Keycloak but not in Descope
+        unique_roles = set(keycloak_roles) - set(descope_roles)
         num_roles = 0
-        try:
-            roles_resp = self.descope_client.mgmt.role.load_all()
-            roles = roles_resp["roles"]
-            descope_roles = [role['name'] for role in roles]
-        except Exception as e:
-            logging.error(f"Failed to get roles: {str(e)}")
-
-        try:
-            file_pattern = f"{self.realm}-realm"
-            for file_name in os.listdir(self.path):
-                if file_name.startswith(file_pattern) and file_name.endswith('.json'):
-                    file_path = os.path.join(self.path, file_name)
-                    with open(file_path, 'r') as f:
-                        file_data = json.load(f)
-                        for role in file_data.get("roles", {}).get("realm", []):
-                            keycloak_roles.append(role["name"])
-                        for client_roles in file_data.get("roles",{}).get("client",{}).values():
-                            for role in client_roles:
-                                keycloak_roles.append(role["name"])
-
-        except Exception as e:
-            logging.error(f"Failed to get keycloak roles from {file_path}: {str(e)}") 
-                        
-        try:
-            # Create roles that exist in Keycloak but not in Descope
-            unique_roles = set(keycloak_roles) - set(descope_roles)
-            for role_name in unique_roles:
-                try:
-                    self.descope_client.mgmt.role.create(name=role_name)
-                    logging.info(f"Created role in Descope: {role_name}")
-                    num_roles += 1
-                except Exception as e:
-                    logging.error(f"Failed to create role {role_name}: {str(e)}")
-        except Exception as e:
-            logging.error(f"Failed to create roles: {str(e)}")  
+        
+        for role_name in unique_roles:
+            try:
+                self.descope_client.mgmt.role.create(name=role_name)
+                logging.info(f"Created role in Descope: {role_name}")
+                num_roles += 1
+            except Exception as e:
+                logging.error(f"Failed to create role {role_name}: {str(e)}")
+                
         print(f"Created {num_roles} roles in Descope")
 
-
-
-    def create_groups_in_descope(self) -> None:
-        descope_groups = []
-        keycloak_groups = []
-        num_groups = 0
+    def get_descope_roles(self) -> List[str]:
+        """Get existing roles from Descope"""
         try:
-            tenants_resp = self.descope_client.mgmt.tenant.load_all()
-            tenants = tenants_resp["tenants"]
-            descope_groups = [tenant['id'] for tenant in tenants]
+            roles_resp = self.descope_client.mgmt.role.load_all()
+            return [role['name'] for role in roles_resp["roles"]]
         except Exception as e:
-            logging.error(f"Failed to get tenants: {str(e)}")
+            logging.error(f"Failed to get Descope roles: {str(e)}")
+            return []
 
-        try: 
+    def get_keycloak_roles(self) -> List[str]:
+        """Get roles from Keycloak realm files"""
+        keycloak_roles = []
+        try:
             file_pattern = f"{self.realm}-realm"
             for file_name in os.listdir(self.path):
                 if file_name.startswith(file_pattern) and file_name.endswith('.json'):
-                    file_path = os.path.join(self.path, file_name)
-                    with open(file_path, 'r') as f:
+                    with open(os.path.join(self.path, file_name), 'r') as f:
                         file_data = json.load(f)
-                        keycloak_groups = [group["name"] for group in file_data.get("groups", [])]
+                        # Get realm roles
+                        keycloak_roles.extend(role["name"] for role in file_data.get("roles", {}).get("realm", []))
+                        # Get client roles
+                        for client_roles in file_data.get("roles", {}).get("client", {}).values():
+                            keycloak_roles.extend(role["name"] for role in client_roles)
+            return keycloak_roles
         except Exception as e:
-            logging.error(f"Failed to get keycloak groups from {file_path}: {str(e)}")
+            logging.error(f"Failed to get Keycloak roles: {str(e)}")
+            return []
 
+    def create_groups_in_descope(self) -> None:
+        """Create groups in Descope that exist in Keycloak but not in Descope"""
         try:
+            keycloak_groups = self.get_keycloak_groups()
+            descope_groups = self.get_descope_groups()
+            
             # Create groups that exist in Keycloak but not in Descope
             unique_groups = set(keycloak_groups) - set(descope_groups)
+            num_groups = 0
+            
             for group_name in unique_groups:
                 try:
-                    self.descope_client.mgmt.tenant.create(name=group_name,id=group_name)
+                    self.descope_client.mgmt.tenant.create(name=group_name, id=group_name)
                     logging.info(f"Created group in Descope: {group_name}")
                     num_groups += 1
                 except Exception as e:
                     logging.error(f"Failed to create group {group_name}: {str(e)}")
+                
+            print(f"Created {num_groups} groups in Descope")
         except Exception as e:
             logging.error(f"Failed to create groups: {str(e)}")
-        print(f"Created {num_groups} groups in Descope")
 
+    def get_descope_groups(self) -> List[str]:
+        """Get existing tenants from Descope"""
+        try:
+            tenants_resp = self.descope_client.mgmt.tenant.load_all()
+            return [tenant['id'] for tenant in tenants_resp["tenants"]]
+        except Exception as e:
+            logging.error(f"Failed to get Descope tenants: {str(e)}")
+            return []
 
-    def process_files(self) -> None:
+    def get_keycloak_groups(self) -> List[str]:
+        """Get groups from Keycloak realm files"""
+        try:
+            file_pattern = f"{self.realm}-realm"
+            for file_name in os.listdir(self.path):
+                if file_name.startswith(file_pattern) and file_name.endswith('.json'):
+                    with open(os.path.join(self.path, file_name), 'r') as f:
+                        file_data = json.load(f)
+                        return [group["name"] for group in file_data.get("groups", [])]
+            return []
+        except Exception as e:
+            logging.error(f"Failed to get Keycloak groups: {str(e)}")
+            return []
+
+    def process_users(self) -> None:
         """Process all user export files in the specified directory that match the realm"""
         try:
             file_pattern = f"{self.realm}-users-"
@@ -149,6 +160,7 @@ class KeycloakMigrationTool:
             logging.error(f"Failed to process files in {self.path}: {str(e)}")
 
     def batch_create_users(self, users_data: List[Dict]) -> int:
+        """Batch create users in Descope"""
         user_batch = []
         disabled_users = []
         try: 
@@ -171,21 +183,7 @@ class KeycloakMigrationTool:
                     disabled_users.append(login_id)
                 # Prepare hashedPassword
                 credentials = user_data.get("credentials", [])
-                hashed_password = None
-                for credential in credentials:
-                    if credential.get("type") == "password":
-                        secret_data = json.loads(credential.get("secretData", "{}"))
-                        cred_data = json.loads(credential.get("credentialData", "{}"))
-                        hashed_password = {
-                            "argon2": {
-                                "hash": secret_data.get("value", ""),
-                                "salt": secret_data.get("salt", ""),
-                                "iterations": cred_data.get("hashIterations", 3),
-                                "memory": int(cred_data.get("additionalParameters", {}).get("memory", ["7168"])[0]),
-                                "threads": int(cred_data.get("additionalParameters", {}).get("parallelism", ["1"])[0])
-                            }
-                        }
-                        break
+                hashed_password = self.process_credentials(credentials)
 
                 # Prepare payload
                 user = {
@@ -232,6 +230,24 @@ class KeycloakMigrationTool:
         except Exception as e:
             logging.error(f"Failed to create {num_users} users: {str(e)}")
     
+    def process_credentials(self, credentials: List[Dict]) -> Dict:
+        """Process Keycloak credentials into Descope format"""
+
+        for credential in credentials:
+            if credential.get("type") == "password":
+                secret_data = json.loads(credential.get("secretData", "{}"))
+                cred_data = json.loads(credential.get("credentialData", "{}"))
+                return {
+                    "argon2": {
+                        "hash": secret_data.get("value", ""),
+                        "salt": secret_data.get("salt", ""),
+                        "iterations": cred_data.get("hashIterations", 3),
+                        "memory": int(cred_data.get("additionalParameters", {}).get("memory", ["7168"])[0]),
+                        "threads": int(cred_data.get("additionalParameters", {}).get("parallelism", ["1"])[0])
+                    }
+                }
+        return None
+
 def main():
     parser = argparse.ArgumentParser(description='Create users in Descope from Keycloak export files')
     parser.add_argument('--path', required=True, help='Path to the exported users folder')
@@ -241,7 +257,7 @@ def main():
     migration_tool = KeycloakMigrationTool(args.path, args.realm)
     migration_tool.create_roles_in_descope()
     migration_tool.create_groups_in_descope()
-    migration_tool.process_files()
+    migration_tool.process_users()
 
 if __name__ == "__main__":
     main() 
