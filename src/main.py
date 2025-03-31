@@ -38,6 +38,7 @@ class KeycloakMigrationTool:
     
     def create_roles_in_descope(self) -> None:
         """Create roles in Descope that exist in Keycloak but not in Descope"""
+        print("Creating roles in Descope...")
         # Consolidate role fetching into a helper method
         keycloak_roles = self.get_keycloak_roles()
         descope_roles = self.get_descope_roles()
@@ -86,6 +87,7 @@ class KeycloakMigrationTool:
 
     def create_groups_in_descope(self) -> None:
         """Create groups in Descope that exist in Keycloak but not in Descope"""
+        print("Creating groups in Descope...")
         try:
             keycloak_groups = self.get_keycloak_groups()
             descope_groups = self.get_descope_groups()
@@ -146,7 +148,7 @@ class KeycloakMigrationTool:
                         users_data = file_data["users"]
                         num_users = self.batch_create_users(users_data)
                         user_count += num_users
-                        
+                        time.sleep(1)
                         # Only print when we reach a new tens value
                         current_tens = user_count // 10
                         if current_tens > last_print:
