@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Dict, List
 import requests
 from dotenv import load_dotenv
+from descope import DescopeClient
+from descope.management.user import UserObj
 import time
 
 # Load environment variables from .env file
@@ -29,16 +31,19 @@ class KeycloakMigrationTool:
         self.realm = realm
         self.project_id = os.getenv('DESCOPE_PROJECT_ID')
         self.management_key = os.getenv('DESCOPE_MANAGEMENT_KEY')
-
+       
         if not self.project_id or not self.management_key:
             raise ValueError("Environment variables DESCOPE_PROJECT_ID and DESCOPE_MANAGEMENT_KEY must be set.")
 
-   
+        self.descope_client = DescopeClient(project_id=self.project_id, management_key=self.management_key)
+    
     def process_files(self) -> None:
         """Process all user export files in the specified directory that match the realm"""
         try:
             file_pattern = f"{self.realm}-users-"
             user_count = 0
+            last_print = 0  # Track the last printed tens value
+            print("Starting user migration...")
             for file_name in os.listdir(self.path):
                 if file_name.startswith(file_pattern) and file_name.endswith('.json'):
                     file_path = os.path.join(self.path, file_name)
@@ -49,16 +54,22 @@ class KeycloakMigrationTool:
                         users_data = file_data["users"]
                         num_users = self.batch_create_users(users_data)
                         user_count += num_users
-                        if user_count % 10 == 0:
-                                print(f"Processed {user_count} users...")
-                        # time.sleep()
+                        
+                        # Only print when we reach a new tens value
+                        current_tens = user_count // 10
+                        if current_tens > last_print:
+                            print(f"Processed {user_count} users...")
+                            last_print = current_tens
                     else:
                         logging.error(f"Invalid file format in {file_path}: missing 'users' array")
+            
+            print(f"Migration complete. Total users processed: {user_count}")
         except Exception as e:
             logging.error(f"Failed to process files in {self.path}: {str(e)}")
 
     def batch_create_users(self, users_data: List[Dict]) -> int:
         user_batch = []
+        disabled_users = []
         try: 
             for user_data in users_data:
                 email = user_data.get("email")
@@ -67,8 +78,10 @@ class KeycloakMigrationTool:
                 
                 # Determine loginId and additionalIdentifiers
                 login_id = username if username else email
+                
                 additional_identifiers = [email] if username else []
-
+                if user_data.get("enabled") == False:
+                    disabled_users.append(login_id)
                 # Prepare hashedPassword
                 credentials = user_data.get("credentials", [])
                 hashed_password = None
@@ -114,6 +127,9 @@ class KeycloakMigrationTool:
             }
 
             response = requests.post(url, headers=headers, json=payload)
+
+            for disabled_user in disabled_users:
+                self.descope_client.mgmt.user.deactivate(login_id=disabled_user)
 
             num_users = len(user_batch)
 
